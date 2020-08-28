@@ -3,18 +3,16 @@
 
 _author_ = "mpinizzotto"
 
-#TODO: update normalization definition to check for special characters in name strings
-#  as well as support mulitple ip addresses
 
 """
-Pulls data from .csv file and creates vRNI application with IP address criteria
+Pulls data from .csv file and creates vRNI application with IP address criteria.
 
     CVS format - required for running this script    
     app_name, tier_name, ip_addr      
     "app1","tier1","10.10.10.0/24"
-    "app2","tier1","10.20.10.0/24"
+    "app2","tier1","10.20.10.0/24","10.4.5.6","10.60.3.4","10.7.89.11"
     
-App name and tier name do not support special characters 
+App name and tier name do not support special characters
 """
 
 import re
@@ -29,10 +27,10 @@ headers = { 'content-type': 'application/json' }
 """
 update these variables 
 """
-username = 'admin@local'
-password = 'mypassword'
-vrni = "vrni.local"
-file = "myfile.csv"
+username = 'apiuser1@lab.local'
+password = 'VMware1!'
+vrni = "192.168.110.80"
+file = "app.csv"
 
 
 def check_current_app(app_name, token_header):
@@ -66,43 +64,41 @@ def create_app_tiers(entity_id,ip_addr,tier_name,token_header):
                 }
             ]
         }
-    ips = []
+		
+    if not tier_name:
+        tier_name = "Tier1"
     if ip_addr is not None:
-        ips.append(ip_addr)
-        for ip in ips:
+        for ip in ip_addr:
             if re.search("^([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})$", ip) or \
                         ("^([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\/[0-9]{1,2})$", ip):
                 valid_ips = True
-    if not tier_name:
-        tier_name = "Tier1"
 
     if valid_ips == True:
         tier_payload['name'] = tier_name
-        tier_payload['group_membership_criteria'][0]['ip_address_membership_criteria']['ip_addresses'] = ips
-        #print tier_payload
+        tier_payload['group_membership_criteria'][0]['ip_address_membership_criteria']['ip_addresses'] = ip_addr
         response = requests.post(url, data=json.dumps(tier_payload), verify=False, headers=token_header)
         parse = json.loads(response.text)
         return parse
     else:
         print "Missing IP address"
 
-
 def read_from_csv(file):
-    item_list = []
-    csvfile = open(file, 'r')
-    csv_in = csv.reader(csvfile)
-    for item in csv_in:
-        item_list.append(item)
-    return item_list
-    cvsfile.close()
-
+    csvfile = open(file, 'rb')
+    with csvfile as f:
+        reader = csv.reader(f)
+        item_list = list(reader)
+        return item_list
+        csvfile.close()
+				
 def normalize_app_list(item_list):
     app_list = []
     for line in item_list:
         app_info = {}
         app_info['name']= line[0]
         app_info['tier_name'] = line[1]
-        app_info['ip_addr'] = line[2]
+        ip_list = []
+        ip_list.append(line[2:])
+        app_info['ip_addr'] = ip_list[0] 
         app_list.append(app_info)
     return app_list
 
@@ -142,9 +138,10 @@ def main():
     for line in app_list:
         app_name = line.get("name")
         ip_addr = line.get("ip_addr")
+        #print ip_addr
         tier_name = line.get("tier_name")
        
-	    is_app = check_current_app(app_name, token_header)
+        is_app = check_current_app(app_name, token_header)
         if is_app == True:
             print "Skipping " + app_name + ",already created "
         if is_app == False:
@@ -153,12 +150,11 @@ def main():
             response =  create_app_tiers(entity_id,ip_addr,tier_name,token_header)
             print "App Name: ", app_name
             print "Tier Name: ", response['name']
-            print "IP Address: ", response['group_membership_criteria'][0]['ip_address_membership_criteria']['ip_addresses'][0]
+            print "IP Address: ", response['group_membership_criteria'][0]['ip_address_membership_criteria']['ip_addresses'][0:]
         else:
             continue
 
 
 if __name__ == '__main__':
     main()
-	
-
+		
