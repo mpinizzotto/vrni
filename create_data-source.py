@@ -10,15 +10,19 @@ import requests
 requests.packages.urllib3.disable_warnings()
 
 """
-Create vCenter and NSX-T Manager data-sources from CSV file
 
-DS_TYPE = vc or nsx-t
+Create vRNI data sources from CSV
 
-DS_TYPE, FQDN, NICKNAME, ENABLED, USERNAME, PASSWORD, PROXY_NAME
+DS_TYPE = vc, nsx-t, nsxalb
 
-examples:
-vc,vcsa-01a.corp.local,my-vc,true,administrator@vsphere.local,VMware1!,NI-Collector_192.168.110.100
-nsx-t,nsx-mgr-01a,my-nsx,admin,VMware1!,NI-Collector_192.168.110.101
+DS_TYPE, FQDN, IP_ADDR, NICKNAME, ENABLED, USERNAME, PASSWORD, PROXY_NAME NOTES (optional)
+Supports only FQDN or IP_ADDR, if both available will default to FQDN
+
+csv examples:
+
+vc,vcsa-01a.corp.local,192.168.110.22,my-vc,true,administrator@vsphere.local,VMware1!,NI-Collector_192.168.110.100,"my notes"
+nsx-t,nsx-mgr-01a,192.168.110.21,my-nsx,admin,VMware1!,NI-Collector_192.168.110.101,"my notes"
+nsxalb,avicon-01a,192.168.110.79,my-nsx-alb,admin,VMware1!,NI-Collector_192.168.110.101,"my notes"
 
 """
 
@@ -26,8 +30,7 @@ vrni = "192.168.110.89"
 username = "admin@local"
 password = "VMware1!"
 headers = { 'content-type': 'application/json' }
-file = "ds.csv"
-
+file = "vrni.csv"
 
 def read_from_csv(file):
     csvfile = open(file, 'r')
@@ -49,6 +52,7 @@ def create_ds_list(item_list):
         ds_info['username'] = line[5]
         ds_info['password']= line[6]
         ds_info['proxy_name'] = line[7]
+        ds_info['notes'] = line[8]
         ds_list.append(ds_info)
     return ds_list
 
@@ -76,16 +80,22 @@ def create_nsxt_datasource(payload,token_header):
     response = requests.post(url, data=json.dumps(payload), verify=False, headers=token_header)
     parse = json.loads(response.text)
     return parse
+	
+def create_nsxalb_datasource(payload,token_header):
+    url = "https://" + vrni + "/api/ni/data-sources/nsxalb"
+    response = requests.post(url, data=json.dumps(payload), verify=False, headers=token_header)
+    parse = json.loads(response.text)
+    return parse
 
 def main():
     url = "https://" + vrni + "/api/ni/auth/token"
     payload =  {
-                   "username" : username,
-                   "password": password,
-                   "domain": {
-                       "domain_type": "LOCAL"
-                   }
-                }
+                 "username" : username,
+                 "password": password,
+                 "domain": {
+                   "domain_type": "LOCAL"
+                 }
+               }
     response = requests.post(url, data=json.dumps(payload), verify=False,  headers=headers)
     parse = json.loads(response.text)
     token = parse['token']
@@ -95,40 +105,40 @@ def main():
     item_list = read_from_csv(file)
     ds_list = create_ds_list(item_list)
     proxy_list = get_proxy_nodes(token_header)
-    
+   
     for line in ds_list:
         proxy_name = line.get('proxy_name')
         for proxy in proxy_list:
             if proxy_name == proxy['name']:
                 proxy_id = proxy['id']
             else:
-                print ("Failed to deploy", line.get('fqdn'), 
-				               "data-source.", proxy_name, "is not a valid vRNI collector.")
-	    
+                print ("Failed to deploy", line.get('fqdn'), "data-source.", proxy_name, "is not a valid vRNI collector.")
+	        
             if line.get('ds_type') == "vc":
 	    
                 payload = {
-                           #"ip": line.get('ip_addr'),
+                           "ip": line.get('ip_addr'),
                            "fqdn": line.get('fqdn'),
                            "proxy_id": proxy_id,
                            "nickname": line.get('nickname'),
                            "enabled": line.get("enabled"),
+                           "notes": line.get("notes"),
                            "credentials": {
                                "username": line.get('username'),
-                               "password": line.get('passwor')
+                               "password": line.get('password')
                            },
                            "ipfix_request": {
                                "disable_all": "true"
                            },
                            "is_vmc": "false"
                        }
-        
+                resp = create_vc_datasource(payload,token_header)
                 if 'entity_type' in resp:
                     print (resp['entity_type'], ": ",resp['fqdn'], " created successfully")
                 else: 
                     print (line.get('fqdn'), resp['code'], resp['details'])
 					
-            if line.get('ds_type') == "nsx-t":
+            elif line.get('ds_type') == "nsx-t":
     
                 payload = {
                            #"ip": line.get("ip_addr"),
@@ -136,6 +146,7 @@ def main():
                            "proxy_id": proxy_id,
                            "nickname": line.get("nickname"),
                            "enabled": line.get('enabled'),
+                           "notes": line.get("notes"),
                            "credentials": {
                                "username": line.get("username"),
                                "password": line.get("password")
@@ -144,7 +155,30 @@ def main():
                            "latency_enabled": "false",
                            "nsxi_enabled": "false",
                        }
+                
+                resp = create_nsxt_datasource(payload,token_header)
+                if 'entity_type' in resp:
+                    print (resp['entity_type'], ": ",resp['fqdn'], " created successfully")
+                else: 
+                    print (line.get('fqdn'), resp['code'], resp['details'])
 
+
+            elif line.get('ds_type') == "nsxalb":
+    
+                payload = {
+                           #"ip": line.get("ip_addr"),
+                           "fqdn": line.get("fqdn"),
+                           "proxy_id": proxy_id,
+                           "nickname": line.get("nickname"),
+                           "enabled": line.get('enabled'),
+                           "notes": line.get("notes"),
+                           "credentials": {
+                               "username": line.get("username"),
+                               "password": line.get("password")
+                          }
+                       }
+                
+                resp = create_nsxalb_datasource(payload,token_header)
                 if 'entity_type' in resp:
                     print (resp['entity_type'], ": ",resp['fqdn'], " created successfully")
                 else: 
@@ -152,7 +186,6 @@ def main():
 
             else:
                 print ("Unsupported data-source Type")
-
 
 if __name__ == '__main__':
        main()
